@@ -3,13 +3,21 @@
 - 📫 How to reach me ...discord:   philo #8240
 
 Platformio VS Code Project
-esp32 & LORA modules RC joystick base station and vehicle devices 
+
+esp32 & LORA modules RC joystick base station and vehicle devices
+
 low bandwidth  8 byte packet over lora which converts to IBUS protocol on vehicle for feeding ardupilot RC input
-uses  2 joysticks with calibrate and centering functions 
+
+uses  2 joysticks with calibrate and centering functions
+
 oled screen display shows joystick posns, radio signal strength at base AND vehicle and gps posn of vehicle
+
 self contained except for OLED Adafruit library
+
 uses two esp32, two Lora modules, GPS module and two joysticks/switches
+
 To use: compile either base or vehicle by commenting the   #define for either PLANE or BASE
+
 
 Holding button down while starting will calibrate joystick ranges (move to extremities then release button)
 Pressing button again later will center the joystick to the currently held positions thus enabling trim
