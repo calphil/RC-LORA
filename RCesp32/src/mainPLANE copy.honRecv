@@ -1,0 +1,501 @@
+//#define PLANE
+
+//**********************************************************************************************************************************************
+#ifdef PLANE
+// P L A N E  // P L A N E  // P L A N E  // P L A N E  // P L A N E  // P L A N E  // P L A N E  
+				#define BLINK
+				#define lorad
+				#define PDEBUG
+				#define GPSD
+				#define sendFC
+
+				//  #undef BLINK
+				//  #undef lorad
+				//  #undef PDEBUG
+				//  #undef GPSD
+				//  #undef sendFC
+
+
+#include <Arduino.h>
+#include <philjoy.h>
+#include <philibus.h>
+//#include "display.h" //
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#include <stdlib_noniso.h> //for the  dtostrf function C sucks badly
+
+
+///CHANGE int to word  NOneed !!!! same 4 bytes each 
+//----------------------------------------------------------------------------------------------------------------------------
+//global     
+static word FC5ints[5]; //holds 4 joyvals      + rssi/mode/alert  = Rsalmd to send to FC....... FC only uses mode info though
+static byte fcinputpkt[32]; //need global as incrementally adding joys/ mode
+int FCbaud = 115200;//baudrate to FC
+                      //BLINK STUFF
+                      #ifdef BLINK
+  int blkpin =2;//LED onboard
+  bool blk = 0;//for blinking
+                      #endif 
+                      //end BLINK STUFF
+                      //GPS STUFF
+                      #ifdef GPSD
+//gps
+int gotafix = 0;
+word gpswords[4]; // 4 word =4 int =16bytes
+double lat ; //  8 bytes
+double lng ; // //check ordering 
+
+void gpsrecv(word * gpswords){//
+    lat = (double) gpswords[0] ;  //cast int to double
+    lng = (double) gpswords[8] ;
+  if(lat != 0.0 && lng != 0.0 ){  //lat lng = 0.0 indicates no fix
+      gotafix = 1;
+  }else{
+      gotafix = 0;
+  }
+}
+
+void gps2words(word * gpswords){//
+        double D[2]= {lat,lng};     //snazzy stuff!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!dfnetjeryjeryjwertjhertjh
+        double* pToDouble = &D[0];
+        gpswords = reinterpret_cast<word*>(pToDouble);
+}
+                      //GPS STUFF
+                       #endif
+/////////////////////////////////////////////////////////////////////////////////////
+                      //OLED STUFF
+                      #ifdef OLEDd
+                  
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+#define OLED_RESET     4 // Reset pin # (or -1 if sharing Arduino reset pin)
+#define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3D for 128x64, 0x3C for 128x32
+//OOOd displ(SCREEN_WIDTH, SCREEN_HEIGHT, &displ,-1,400000,100000);//reset = -1 not used!!!!!
+Adafruit_SSD1306 displ(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire);//reset = -1 not used!!!!!
+
+    String sca = "CAL >>>> ";
+    String sce = "CEN >>>> ";
+    String smd ="mode ";
+    String sla= "LAT ";
+    String slg= "LNG ";
+    String srs ="rsii ";
+    String  sal ="alrt ";
+
+    int linenos;
+    String St; 
+    int  vali;
+
+    void oprtclearline(   int linenos);
+    void oprtname( String St , int linenos );
+    void oprtnameval( String St, int  vali , int linenos );
+    void oprtgps( long * vali , int linenos );
+    void oprtlatlng( double  vlat ,double  vlng , int linenos );
+    void oprt4byte3row(  int linenos );
+    void oprt4byte( int row, int linenos );
+    void oprtsingle( int val);//for testing
+                      #endif
+                      //endOLED
+//////////////////////////////////////////////////////////////////////////////////////
+                      //LORA  STUFF
+                      #ifdef lorad
+#include "txrx.h" //this in turn initializes LoRa  //        common for both txbase and plane lenght of packets is the decider
+
+void onRecv(int psize); //declareit here move implimentation definition to bottom
+                      #endif
+                      //endif LORA  STUFF
+//////////////////////////////////////////////////////////////////////////////////////
+  long unsigned timestd  = 0;  //for elapsed time  
+  int stdperiod  = 1000 ;//1hz rate
+  long unsigned timetxrssi2  = 0;  //for elapsed time  
+  int txrssi2sendperiod  = 1000 ;//1hz rate
+  long unsigned timetx2plane  = 0;  //for elapsed time 
+  int txplanesendperiod   = 90; //  1000/11 ;//11hz rate above the 10 sent from recv to FC  
+                        #ifdef sendFC
+  long unsigned timefc = 0;  //for elapsed time FC send
+  int FCsendperiod  = 1000 /10;//10hz rate
+                        #endif
+                        //end sendFC
+  //timing or use rtos LATERFC send
+                        #ifdef GPSD
+  long unsigned timetxgps  = 0;  //for elapsed time 
+  int txgpssendperiod  = 1000 ;//1hz rate
+                        #endif
+                        //end sendFC
+/////////////////////////////////////////////////////////////////////////////////////
+                    //JOY STUFF
+                      #ifdef JOY
+  void joycentering(){                    
+        int buttonup ;
+        while (centering) {
+              for(int i =0; i<3;i++)//no need to center throttle
+                cal[i][1] = anReadavg(P[i]);
+              buttonup = digitalRead(dcal);
+              //debounce
+              delay(50);
+              int temp = digitalRead(dcal);
+              if (temp ==  buttonup ) 
+                  centering = 0;
+        }//endwhile
+        centering = 1;
+                      //OLED STUFF
+                      #ifdef OLEDd
+        displ.clearDisplay();
+        oprt4byte( 0 , 2 ); //row,linenos
+        oprt4byte( 1 , 3 ); //row,linenos
+        oprt4byte( 2 , 4 ); //row,linenos
+        displ.display();
+                      #endif
+                      //endOLED
+}
+                      #endif 
+                      //end JOY STUFF
+
+//@#$@!#%!#$%^!#$^!#$^@!$%^@$%@$%&@$%&@$%&@$%&@$%&@$&@$&@$&@$&@#$&$@#&@$&@$&$&*@$&@$*&@#$@$*@#$^*#%^*#%^*#%^*#%^*#%*#%*#%*#%*#%^*%#
+void setup(void){
+                        //BLINK STUFF
+                      #ifdef BLINK
+  pinMode(blkpin, OUTPUT);
+  Serial.begin(115200);
+                //delay (4000);
+                ddg("setupstrt");
+                digitalWrite(blkpin, 0);
+                delay (1000);
+                      #endif 
+                      //end BLINK STUFF
+ 
+                      //JOY STUFF
+                      #ifdef JOY
+  for(int i =0; i<4;i++){
+    pinMode(P[i], INPUT); 
+  }
+  pinMode(32, INPUT_PULLUP); //high with sw off
+  for(int i =0; i<3;i++){
+    pinMode(sw[i], INPUT); 
+  }
+                      #endif 
+                      //end JOY STUFF
+                      //OLED STUFF
+                      #ifdef OLEDd
+    if(!displ.begin( (uint8_t) SSD1306_SWITCHCAPVCC, (uint8_t) SCREEN_ADDRESS)) {  // this should do this:  displ.begin (21, 22);   // sda= GPIO_21 /scl= GPIO_22
+        Serial.println(F("SSD1306 allocation failed"));
+    }
+    displ.setTextColor(WHITE, BLACK);
+    displ.setTextSize(1);          // text size
+    displ.setTextColor(WHITE);
+                      #endif 
+                      //end OLED STUFF
+//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+//CALIBRATE STUFF
+                    //JOY STUFF
+                      #ifdef JOY
+                      //OLED STUFF
+                      #ifdef OLEDd
+  displ.clearDisplay();
+  oprtname( sca, 2); 
+                      #endif 
+                      //end OLED STUFF
+  int rv;
+  int buttonup ;
+  delay(2000);
+  buttonup = digitalRead(dcal);
+  //debounce
+  delay(50);
+  int temp = digitalRead(dcal);
+  if (temp ==  buttonup )buttonup = temp;
+  //DEBUG
+  //buttonup = 0;
+  if(!buttonup){//start calibration otherwise just start with pre hardcoded calibation
+      while (!buttonup) {
+              for(int i =0; i<4;i++){
+                rv = anReadavg(P[i]);
+                if(rv < cal[i][0]) cal[i][0] = rv; //min  //remember arrays start at 0 so [1] is middle
+                if(rv > cal[i][2]) cal[i][2] = rv;  //max //remember arrays start at 0 so [1] is middle
+                      //OLED STUFF
+                      #ifdef OLEDd
+                displ.clearDisplay();
+                oprt4byte( 0 , 2 ); //row,linenos
+                oprt4byte( 2 , 4 ); //row,linenos
+                displ.display();
+                delay(50);
+                      #endif 
+                      //end OLED STUFF
+                buttonup = digitalRead(dcal);
+                //debounce
+                delay(50);
+                 temp = digitalRead(dcal);
+                if (temp ==  buttonup )buttonup = temp;
+              }
+      }//endwhile
+                      //OLED STUFF
+                      #ifdef OLEDd
+      displ.clearDisplay();
+      oprtname( sce, 4); 
+      displ.display();
+                      #endif 
+                      //end OLED STUFF
+      delay(5000);//to allow centering read
+      joycentering();
+  }//endif calibrate
+                      #endif 
+                      //end JOY STUFF
+//&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+                      //LORA  STUFF
+                      #ifdef lorad
+  setupLORA();
+  onRec(onRecv); //inform txrx what the call back function is, which inturn inrms Lra what the same callback function is ..... double "indirection"
+                      #endif
+                      //endif lorad
+}//end setupxmit
+//**********************************************************************************************************************************************
+//**********************************************************************************************************************************************
+                      //LORA  STUFF
+                      #ifdef lorad
+void onRecv(int psize) {     //eventually the onReceive = callback function for LoRa via function in txrx.h;
+  byte inpkt[32]; //holds scratch data bytes ]
+  word inval[16]; //max recvd ints is 8+8 //and shared for each receive case
+  //get the pkt
+  readpkt(  inpkt,  psize); 
+  switch (psize){
+    case 32:{//a 32 byte ibus packet with 2x14 data bytes
+            //decode pkt
+            //we dont send  a full ibus pkt  yet
+    }       
+      break;
+    case 20:{// 8+8+4 byte  packet ( lat and long) // double = 64bit ,int ABD word  in esp is 32bit , arduino uno 16
+      if (ibus_decode( inpkt, inval )){ //generalised decoder
+          gpsrecv(inval);
+          if(gotafix){
+                                                // //      push to display
+
+                      //OLED STUFF
+                      #ifdef OLEDd
+            oprtlatlng(  lat,lng,5);  //array of  TWO longs lat and lng passed in 
+                      #endif 
+
+
+                                                // //      push to antenna tracker later
+          }else{
+                      //OLED STUFF
+                      #ifdef OLEDd
+            oprtclearline( 5 );  oprtclearline( 6 );           
+                      #endif 
+          }
+      }      
+      break;
+    }
+    case 8:{ //a  joystick return
+        //byte fcinputpkt[32];//use  stored array so can asynchnously send to FC at predetermined rate independant of loop rate
+        if(decode4byte( inpkt , FC5ints )){  //NOTE the 5th PX5ints holds mode and must be protected
+
+        //!!!!EXPAND BYTES TO INTS FOR JOYvals IE 0-250 >>> 1000-2000
+              //FC5ints now has the 4 joyvals init
+              //assuming a mode pkt has been received put this into the fifth  member ie [4] of  array
+              FC5ints[4] =   Modefreq [rssi2Rsalmd( Rsalmd)];
+
+        }
+      break;
+    }
+    case 6:{
+        //PLANE ONLY
+        int tempi =-1;
+        if (decode2byte (inpkt,  tempi)){     //NOTE the 4 first ints of  FC5ints holds joys and must be protected  //  FC5ints[4] combine with FC input 
+              decodeRsalmd(tempi,  &Rsalmd);
+              //At this time only process the Modesw to plane 
+              //others can be used as information BUT NOT YET
+        } 
+
+      break;
+    }
+  }
+}
+                      #endif
+                      //endif lorad
+//////////////////////////////////////////////////////////////////////////////////////
+
+//**********************************************************************************************************************************************
+//   if (millis() > 5000 && gps.charsProcessed() < 10)
+ 
+
+//$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+
+                      //OLED STUFF
+                      #ifdef OLEDd
+    
+    void oprtclearline(   int linenos){  //
+        displ.setCursor(1,10*linenos -9); 
+        displ.print ( F("________________") ); //16 chars of blank I hope
+        displ.display();
+    }
+
+    void oprtname( String St , int linenos ){  //
+          //int ls;
+          //ls =St.length();
+          displ.setCursor(1,10*linenos -9); 
+          displ.print (St );
+          displ.display();
+    }
+
+    void oprtnameval( String St, int  vali , int linenos ){  //passing an int but usually a byte 
+          displ.setCursor(1,10*linenos -9); 
+          displ.print (St + F(" ") + vali);
+          displ.display();
+    }
+    void oprt4byte3row( int linenos ){  //passing an int but usually a byte 
+          for (int c=0; c< 3;c++){
+            displ.setCursor(1,10*linenos -9 + c*6);
+            for (int i=0; i< 4;i++){
+              displ.setCursor(i*6 *5 +1 ,10*linenos -9 + c*6);
+              displ.print (cal[i][c]);
+           }             
+          }
+          displ.display();
+    }
+    void oprt4byte( int c, int linenos ){  //passing an int but usually a byte 
+            displ.setCursor(1,10*linenos -9 + c*6);
+            for (int i=0; i< 4;i++){
+              displ.setCursor(i*6 *5 +1 ,10*linenos -9 + c*6);
+              displ.print (cal[i][c]);
+           }             
+    }
+                //
+                char flbuf[12]={'a','a','a','a','a','a','a','a','a','a','a','a'};
+                char * oprtfloat6( double  along  ,char * buf, int len = 12,int prec=6){
+                  //int n;
+                  //n = sprintf (flbuf, "%d plusd %d is %d",1,2,3);
+                  char * cp;
+                  cp = dtostrf(along, len, prec, flbuf);
+                  return cp;
+                }  
+
+    void oprtsingle( int val){//for testing
+            displ.setCursor(30,30);
+            displ.clearDisplay();
+            char ddd[] = {'1','1','1','1','1','1','1','1','1'};
+            char *dd = &ddd[0];
+            itoa(val,dd,0);
+            displ.print (dd);
+            displ.display();
+    }  
+
+    void oprtlatlng( double  vlat ,double  vlng , int linenos ){  
+      oprtfloat6(vlat, flbuf); //sign + 3 + . + 6 >   11 bytes the 12th for a String is null,0
+      displ.setCursor(1,10*linenos -9); 
+      displ.print (sla);
+      displ.setCursor(24,10*linenos -9);
+      displ.print (flbuf);
+      oprtfloat6(vlng, flbuf); //sign + 3 + . + 6 >   11 bytes the 12th for a String is null,0
+      displ.setCursor(1,10*linenos +1); 
+      displ.print (slg);
+      displ.setCursor(24,10*linenos +1);
+      displ.print (flbuf);
+      displ.display();
+    }
+                      //OLED STUFF
+                      #endif 
+
+                      //GPS  STUFF
+                      #ifdef GPSD
+#include <TinyGPS++.h>
+//static const int RXPin = 4, TXPin = 3;
+static const uint32_t GPSBaud = 38400; //is it 9600?????????
+TinyGPSPlus gps;
+                      #endif
+                      //endGPS stuff
+//////////////////////////////////////////////////////////////////////////////////////
+                      #ifdef sendFC
+  HardwareSerial hs1(1); //connect to FC
+                      #endif//end sendFC
+//////////////////////////////////////////////////////////////////////////////////////
+
+
+//need to change loop() b/w base and plane
+void loop(){
+
+  int mt ;
+  mt =millis();            
+
+  if (mt > timestd){
+              timestd = millis() + stdperiod ; //set timer 
+                      //BLINK STUFF
+                      #ifdef BLINK
+              //ddg("1sec");
+              blk = !blk;
+              digitalWrite(blkpin, blk);
+                        #endif 
+                      //end BLINK STUFF
+  }
+
+
+
+
+          byte localbdata[32]; 
+            if (hs1.available() > 0){
+              if (gps.encode(hs1.read())){
+                if (gps.location.isValid()){ 
+                  gotafix = 1;
+                  lat =  gps.location.lat(); //smallest  first [0]th in array ie little endian!?
+                  lng =  gps.location.lng();
+                }else{
+                   gotafix = 0;
+                   alert = 10;// change this when have alert list
+                   lat =0.0;
+                   lng =0.0;
+                }
+              } 
+            }
+            //always make a pakt BUT lat long = 0 if no fix -- dont think will be flying in central atlantic
+          //lora sendpkt
+  if (mt > timetxgps && gotafix){
+              timetxgps = millis() + txgpssendperiod ; //set timer 
+              //make a pakt lat long = 0 if no fix -- dont think will be flying in central atlantic
+              gps2words( gpswords);                  
+              makeintshortpkt( localbdata,  gpswords, 16);
+              txpkt( localbdata, 8 + 4);
+        //other housekeeping
+                      //BLINK STUFF
+                      #ifdef BLINK
+              //ddg("sentGPS",mt);
+              blk = !blk;
+              digitalWrite(blkpin, blk);
+                        #endif 
+                      //end BLINK STUFF
+      
+  }          
+  if (mt > timetxrssi2){
+          timetxrssi2 = millis() + txrssi2sendperiod ; //set timer 
+          //note no UNIQUE Modesw alert  in plane yet so just send back boomerang to txbase  //DO LATER TWO SETS vars
+          encodeRsalmd( Rsalmd);
+          //makepkt
+          makeRsalmd(  Rsalmd , localbdata  )  ;
+          //lora sendpkt
+          txpkt( localbdata , 6); //later do a "sizeof"
+  }          
+  if (mt > timefc){
+              timefc = mt + FCsendperiod ; //set timer 
+              makeibuspkt( fcinputpkt, FC5ints , 5);
+              //send to FC uart Ibus pkt
+              //ele,ail,rud,MODE
+              hs1.write(fcinputpkt,32);
+          //DEBUG stuff 
+          #ifdef PDEBUG
+              //ddg("FC5ints");
+              for(int i=0 ;i<4;i++){
+                ddg("fc   ",FC5ints[i]);
+              }
+              ddg("________");
+              delay(2000);
+          #endif 
+          //DEBUG stuff 
+ 
+  }
+}//end loop plane
+
+#endif
+//END PLANE
+//**********************************************************************************************************************************************
+
+
+
+
+
